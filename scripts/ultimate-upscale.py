@@ -317,6 +317,8 @@ class USDURedraw():
             for index in range(len(job.tile_rects)):
                 init_images.append(image.crop(job.tile_rects[index]))
             p.init_images = init_images  
+            p.all_seeds = [random.randint(0, 1048576) for i in range(len(init_images))]; 
+            p.all_subseeds = [random.randint(0, 1048576) for i in range(len(init_images))];
             tile_rect = job.tile_rects[0]
             mask, draw = self.init_draw(p, tile_rect[2] - tile_rect[0],tile_rect[3] - tile_rect[1])
             draw.rectangle(job.mask_rect, fill="white") 
@@ -577,8 +579,11 @@ class USDUSeamsFix():
             p.height = self.tile_size
             p.inpaint_full_res = True
             p.inpaint_full_res_padding = self.padding
+            p.all_seeds = [random.randint(0, 1048576) for i in range(len(init_images))]; 
+            p.all_subseeds = [random.randint(0, 1048576) for i in range(len(init_images))];
             p.init_images = init_images   
             p.batch_size = len(init_images)
+            
             tile_width = job.tile_rects[0][2] - job.tile_rects[0][0]
             tile_height = job.tile_rects[0][3] - job.tile_rects[0][1]
             mask = Image.new("RGB", (tile_width, tile_height), "black")
@@ -607,6 +612,8 @@ class USDUSeamsFix():
             p.height = self.tile_size
             p.inpaint_full_res = True
             p.inpaint_full_res_padding = self.padding
+            p.all_seeds = [random.randint(0, 1048576) for i in range(len(init_images))]; 
+            p.all_subseeds = [random.randint(0, 1048576) for i in range(len(init_images))];
             p.init_images = init_images   
             p.batch_size = len(init_images)
             tile_width = job.tile_rects[0][2] - job.tile_rects[0][0]
@@ -655,7 +662,6 @@ class USDUSeamsFix():
                 mask = Image.new("L", (fixed_image.width, fixed_image.height), "black")
                 mask.paste(gradient, (xi*self.tile_size + self.tile_size//2,
                                       yi*self.tile_size + self.tile_size//2))
-
                 p.init_images = [fixed_image]
                 p.image_mask = mask
                 processed = processing.process_images(p)
@@ -735,13 +741,13 @@ class USDUSeamsFix():
 
 class Script(scripts.Script):
     def title(self):
-        return "Ultimate SD upscale"
+        return "Gigadiffusion"
 
     def show(self, is_img2img):
         return is_img2img
 
     def ui(self, is_img2img):
-
+        print("def the new stuff")
         target_size_types = [
             "From img2img2 settings",
             "Custom size",
@@ -760,38 +766,32 @@ class Script(scripts.Script):
             "Chess",
             "None"
         ]
-        
-        info = gr.HTML(
-            "<p style=\"margin-bottom:0.75em\">Will upscale the image depending on the selected target size type</p>")
 
         with gr.Row():
-            target_size_type = gr.Dropdown(label="Target size type", choices=[k for k in target_size_types], type="index",
-                                  value=next(iter(target_size_types)))
+            target_size_type = gr.Dropdown(label="Size", choices=[k for k in target_size_types], type="index",
+                                  value=target_size_types[2])
 
             custom_width = gr.Slider(label='Custom width', minimum=64, maximum=8192, step=64, value=2048, visible=False, interactive=True)
             custom_height = gr.Slider(label='Custom height', minimum=64, maximum=8192, step=64, value=2048, visible=False, interactive=True)
-            custom_scale = gr.Slider(label='Scale', minimum=1, maximum=16, step=0.01, value=2, visible=False, interactive=True)
+            custom_scale = gr.Slider(label='Scale', minimum=1, maximum=16, step=0.01, value=2, visible=True, interactive=True)
 
-        gr.HTML("<p style=\"margin-bottom:0.75em\">Redraw options:</p>")
         with gr.Row():
-            upscaler_index = gr.Radio(label='Upscaler', choices=[x.name for x in shared.sd_upscalers],
+            upscaler_index = gr.Radio(label='1. Upscale', choices=[x.name for x in shared.sd_upscalers],
                                 value=shared.sd_upscalers[0].name, type="index")
         with gr.Row():
-            redraw_mode = gr.Dropdown(label="Type", choices=[k for k in redrow_modes], type="index", value=next(iter(redrow_modes)))
+            redraw_mode = gr.Dropdown(label="2. Redraw", choices=[k for k in redrow_modes], type="index", value=redrow_modes[1])
             tile_size = gr.Slider(minimum=256, maximum=2048, step=64, label='Tile size', value=512)
-            mask_blur = gr.Slider(label='Mask blur', minimum=0, maximum=64, step=1, value=8)
-            padding = gr.Slider(label='Padding', minimum=0, maximum=128, step=1, value=32)
-        gr.HTML("<p style=\"margin-bottom:0.75em\">Seams fix:</p>")
+            redraw_blur = gr.Slider(label='Blur (px)', minimum=0, maximum=64, step=1, value=0)
+            padding = gr.Slider(label='Context Padding (px)', minimum=0, maximum=128, step=1, value=128)
         with gr.Row():
-            seams_fix_type = gr.Dropdown(label="Type", choices=[k for k in seams_fix_types], type="index", value=next(iter(seams_fix_types)))
-            seams_fix_denoise = gr.Slider(label='Denoise', minimum=0, maximum=1, step=0.01, value=0.35, visible=False, interactive=True)
+            seams_fix_type = gr.Dropdown(label="3. Deseam", choices=[k for k in seams_fix_types], type="index", value=seams_fix_types[2])
+            seams_fix_denoise = gr.Slider(label='Denoise (%)', minimum=0, maximum=1, step=0.01, value=0.45, visible=True, interactive=True)
             seams_fix_width = gr.Slider(label='Width', minimum=0, maximum=128, step=1, value=64, visible=False, interactive=True)
-            seams_fix_mask_blur = gr.Slider(label='Mask blur', minimum=0, maximum=64, step=1, value=4, visible=False, interactive=True)
-            seams_fix_padding = gr.Slider(label='Padding', minimum=0, maximum=128, step=1, value=16, visible=False, interactive=True)
-        gr.HTML("<p style=\"margin-bottom:0.75em\">Save options:</p>")
+            seam_blur = gr.Slider(label='Blur (px)', minimum=0, maximum=64, step=1, value=0, visible=True, interactive=True)
+            seams_fix_padding = gr.Slider(label='Context Padding (px)', minimum=0, maximum=128, step=1, value=128, visible=True, interactive=True)
         with gr.Row():
-            save_upscaled_image = gr.Checkbox(label="Upscaled", value=True)
-            save_seams_fix_image = gr.Checkbox(label="Seams fix", value=False)
+            save_upscaled_image = gr.Checkbox(label="Save Redraw", value=True)
+            save_seams_fix_image = gr.Checkbox(label="Save Deseam", value=True)
 
         def select_fix_type(fix_index):
             all_visible = fix_index != 0
@@ -806,7 +806,7 @@ class Script(scripts.Script):
         seams_fix_type.change(
             fn=select_fix_type,
             inputs=seams_fix_type,
-            outputs=[seams_fix_denoise, seams_fix_width, seams_fix_mask_blur, seams_fix_padding]
+            outputs=[seams_fix_denoise, seams_fix_width, seam_blur, seams_fix_padding]
         )
 
         def select_scale_type(scale_index):
@@ -823,13 +823,13 @@ class Script(scripts.Script):
             inputs=target_size_type,
             outputs=[custom_width, custom_height, custom_scale]
         )
-
-        return [info, tile_size, mask_blur, padding, seams_fix_width, seams_fix_denoise, seams_fix_padding,
-                upscaler_index, save_upscaled_image, redraw_mode, save_seams_fix_image, seams_fix_mask_blur, 
+        print("completed rteurning the new stuff")
+        return [tile_size, redraw_blur, padding, seams_fix_width, seams_fix_denoise, seams_fix_padding,
+                upscaler_index, save_upscaled_image, redraw_mode, save_seams_fix_image, seam_blur, 
                 seams_fix_type, target_size_type, custom_width, custom_height, custom_scale]
 
     def run(self, p, _, tile_size, mask_blur, padding, seams_fix_width, seams_fix_denoise, seams_fix_padding, 
-            upscaler_index, save_upscaled_image, redraw_mode, save_seams_fix_image, seams_fix_mask_blur, 
+            upscaler_index, save_upscaled_image, redraw_mode, save_seams_fix_image, seam_bark, 
             seams_fix_type, target_size_type, custom_width, custom_height, custom_scale):
 
         # Init
@@ -864,7 +864,7 @@ class Script(scripts.Script):
         
         # Drawing
         upscaler.setup_redraw(redraw_mode, padding, mask_blur)
-        upscaler.setup_seams_fix(seams_fix_padding, seams_fix_denoise, seams_fix_mask_blur, seams_fix_width, seams_fix_type)
+        upscaler.setup_seams_fix(seams_fix_padding, seams_fix_denoise, seam_bark, seams_fix_width, seams_fix_type)
         upscaler.print_info()
         upscaler.add_extra_info()
         upscaler.process()
