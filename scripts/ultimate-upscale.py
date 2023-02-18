@@ -8,6 +8,82 @@ from modules.processing import Processed
 from modules.shared import opts, state
 from enum import Enum
 
+class RectCalculator:
+    @staticmethod
+    def prefer_double_draw():
+        # Set true to inset the last tile in rows/cols such that it sees as much of the original image as possible.
+        # This also causes 2x the redraws in certain areas of the image, adjacent to seams, which is distracting. 
+        return False
+        
+    @staticmethod
+    def calc_row_seam_in_tile(tile_size, padding, width, height, xi, yi, cols, rows):
+        mask = RectCalculator.calc_tile(tile_size, padding, width, height, xi, yi, cols, rows) 
+        y_shift = math.floor(tile_size // 2)
+        return (mask[0], mask[1] + y_shift, mask[2], mask[3] + y_shift)
+    
+    @staticmethod
+    def calc_col_seam_in_tile(tile_size, padding, width, height, xi, yi, cols, rows):
+        mask = RectCalculator.calc_tile(tile_size, padding, width, height, xi, yi, cols, rows) 
+        x_shift = math.floor(tile_size // 2)
+        return (mask[0] + x_shift, mask[1], mask[2] + x_shift, mask[3])
+
+    @staticmethod
+    def calc_mask_in_tile(tile_size, padding, xi, yi, cols, rows):
+        start_x = 0
+        end_x = 0
+        if xi == 0:
+            start_x = 0
+            end_x = tile_size
+        elif xi == (cols - 1) and RectCalculator.prefer_double_draw():
+            end_x = padding + tile_size
+            start_x = padding
+        else:
+            start_x = padding / 2
+            end_x = start_x + tile_size
+        
+        start_y = 0
+        end_y = 0
+        if yi == 0:
+            start_y = 0
+            end_y = tile_size
+        elif yi == (rows - 1) and RectCalculator.prefer_double_draw():
+            start_y = padding
+            end_y = padding + tile_size
+        else:
+            start_y = padding // 2
+            end_y = start_y + tile_size
+        rect = math.floor(start_x), math.floor(start_y), math.floor(end_x), math.floor(end_y)
+        return rect
+
+    @staticmethod
+    def calc_tile(tile_size, padding, width, height, xi, yi, cols, rows):
+        start_x = 0
+        end_x = 0
+        if xi == 0:
+            start_x = 0
+            end_x = tile_size + padding
+        elif xi == (cols - 1) and RectCalculator.prefer_double_draw():
+            end_x = width
+            start_x = end_x - tile_size - padding
+        else:
+            start_x = tile_size * xi - (padding // 2)
+            end_x = start_x + padding + tile_size
+        
+        start_y = 0
+        end_y = 0
+        if yi == 0:
+            start_y = 0
+            end_y = tile_size + padding
+        elif yi == (rows - 1) and RectCalculator.prefer_double_draw():
+            end_y = height
+            start_y = end_y - tile_size - padding
+        else:
+            start_y = tile_size * yi - (padding // 2)
+            end_y = start_y + padding + tile_size
+        rect = math.floor(start_x), math.floor(start_y), math.floor(end_x), math.floor(end_y)
+        return rect
+
+
 class USDUJob():
     def __init__(self) -> None:
         self.mask_rect = None
@@ -167,16 +243,6 @@ class USDURedraw():
         mask = Image.new("L", (width, height), "black")
         draw = ImageDraw.Draw(mask)
         return mask, draw
-    
-    def init_debug_draw(self, p, width, height, tile_index):
-        p.inpaint_full_res = True
-        p.inpaint_full_res_padding = self.padding
-        p.width = math.ceil((self.tile_size+self.padding) / 64) * 64
-        p.height = math.ceil((self.tile_size+self.padding) / 64) * 64
-        mask = Image.new("RGBA", (width, height), (255, 255, 255, 0))
-        draw = ImageDraw.Draw(mask)
-        draw.text((0, 0), str(tile_index), fill=(0, 0, 0, 255), stroke_fill=(0, 0, 0, 255), stroke_width=2)
-        return mask, draw
 
     def linear_process(self, p, image, rows, cols):
         for yi in range(rows):
@@ -201,58 +267,10 @@ class USDURedraw():
         return image
     
     def calc_mask_in_tile(self, xi, yi, cols, rows):
-        start_x = 0
-        end_x = 0
-        if xi == 0:
-            start_x = 0
-            end_x = self.tile_size
-        elif xi == (cols - 1):
-            end_x = self.padding + self.tile_size
-            start_x = self.padding
-        else:
-            start_x = self.padding / 2
-            end_x = start_x + self.tile_size
-        
-        start_y = 0
-        end_y = 0
-        if yi == 0:
-            start_y = 0
-            end_y = self.tile_size
-        elif yi == (rows - 1):
-            start_y = self.padding
-            end_y = self.padding + self.tile_size
-        else:
-            start_y = self.padding // 2
-            end_y = start_y + self.tile_size
-        rect = math.floor(start_x), math.floor(start_y), math.floor(end_x), math.floor(end_y)
-        return rect
+        return RectCalculator.calc_mask_in_tile(self.tile_size, self.padding, xi, yi, cols, rows)
 
     def calc_tile(self, width, height, rows, cols, xi, yi):
-        start_x = 0
-        end_x = 0
-        if xi == 0:
-            start_x = 0
-            end_x = self.tile_size + self.padding
-        elif xi == (cols - 1):
-            end_x = width
-            start_x = end_x - self.tile_size - self.padding
-        else:
-            start_x = self.tile_size * xi - (self.padding // 2)
-            end_x = start_x + self.padding + self.tile_size
-        
-        start_y = 0
-        end_y = 0
-        if yi == 0:
-            start_y = 0
-            end_y = self.tile_size + self.padding
-        elif yi == (rows - 1):
-            end_y = height
-            start_y = end_y - self.tile_size - self.padding
-        else:
-            start_y = self.tile_size * yi - (self.padding // 2)
-            end_y = start_y + self.padding + self.tile_size
-        rect = math.floor(start_x), math.floor(start_y), math.floor(end_x), math.floor(end_y)
-        return rect
+        return RectCalculator.calc_tile(self.tile_size, self.padding, width, height, xi, yi, cols, rows)
 
     def calc_jobs_count(self, width, height, rows, cols, requested_batch_size):
         if self.enabled != True:
@@ -305,7 +323,7 @@ class USDURedraw():
         self.jobs = jobs
         print(len(self.jobs), "redraw chess jobs with max batch size", requested_batch_size)
 
-    def chess_process(self, p, image, rows, cols):
+    def chess_process(self, p, image):
         debug = False
         jobs = self.jobs
         processed_count = 0
@@ -316,7 +334,7 @@ class USDURedraw():
             init_images = []
             for index in range(len(job.tile_rects)):
                 init_images.append(image.crop(job.tile_rects[index]))
-            p.init_images = init_images  
+            p.init_images = init_images
             p.all_seeds = [random.randint(0, 1048576) for i in range(len(init_images))]; 
             p.all_subseeds = [random.randint(0, 1048576) for i in range(len(init_images))];
             tile_rect = job.tile_rects[0]
@@ -328,9 +346,11 @@ class USDURedraw():
                 if image.mode != "RGBA":
                     image = image.convert("RGBA")
                 for index in range(len(init_images)):
-                    init_image = init_images[index].convert("RGBA")
+                    init_image = Image.new("RGBA", init_images[index].size, (255, 0, 0, 255))
                     d = ImageDraw.Draw(init_image)
+                    d.rectangle(job.mask_rect, fill=(0,255,0,255))
                     d.text((job.mask_rect[0], job.mask_rect[1]), str(processed_count), fill=(0, 0, 0, 255), stroke_fill=(255, 255, 255, 255), stroke_width=2)
+                    d.text((job.mask_rect[0] + 16, job.mask_rect[1]), str(processed_count), fill=(255, 255, 255, 255), stroke_fill=(0, 0, 0, 255), stroke_width=2)
                     print("tile #", processed_count, "in rect", job.tile_rects[index], "and mask rect", job.mask_rect)
                     processed_count += 1
                     image.paste(init_image, job.tile_rects[index])
@@ -342,10 +362,10 @@ class USDURedraw():
                     image.paste(paste_image, job.tile_rects[index])
         p.width = image.width
         p.height = image.height
-        if debug:
-            self.initial_info = "debugging run"
-        else:    
+        if not debug:
             self.initial_info = processed.infotext(p, 0)
+        else:
+            self.initial_info = "no info, redraw in debug mode"    
 
         return image
     
@@ -354,7 +374,7 @@ class USDURedraw():
         if self.mode == USDUMode.LINEAR:
             return self.linear_process(p, image, rows, cols)
         if self.mode == USDUMode.CHESS:
-            return self.chess_process(p, image, rows, cols)
+            return self.chess_process(p, image)
 
 class USDUSeamsFix():
 
@@ -372,7 +392,7 @@ class USDUSeamsFix():
         self.create_jobs(width, height, rows, cols, requested_batch_size)   
         seams_job_count = len(self.row_jobs) + len(self.col_jobs) 
         if self.mode == USDUSFMode.HALF_TILE_PLUS_INTERSECTIONS:
-            seams_job_count += (self.rows - 1) * (self.cols - 1)
+            seams_job_count += (rows - 1) * (cols - 1)
         return seams_job_count
 
     def create_jobs(self, width, height, rows, cols, requested_batch_size):
@@ -396,6 +416,7 @@ class USDUSeamsFix():
                 if (not even_row and not even_column):
                     continue
                 row_tiles.append((xi, yi))
+        print("processing", len(row_tiles), "row seams")
 
         while(len(row_tiles) > 0):
             batch_size = requested_batch_size
@@ -408,7 +429,7 @@ class USDUSeamsFix():
                 xi = pair[0]
                 yi = pair[1]
                 mask_rect = self.calc_mask_in_tile(xi, yi, cols, rows)
-                tile_rect = self.calc_row_gradient_tile(width, height, rows, cols, xi, yi)
+                tile_rect = self.calc_row_gradient_tile(rows, cols, width, height, xi, yi)
                 if False == job.add(tile_rect, mask_rect):
                     break
                 actual_batch_size += 1
@@ -437,7 +458,8 @@ class USDUSeamsFix():
                 if (not even_row and not even_column):
                     continue
                 col_tiles.append((xi, yi))
-                
+        print("processing", len(col_tiles), "column seams")
+         
         while(len(col_tiles) > 0):
             batch_size = requested_batch_size
             actual_batch_size = 0
@@ -449,7 +471,7 @@ class USDUSeamsFix():
                 xi = pair[0]
                 yi = pair[1]
                 mask_rect = self.calc_mask_in_tile(xi, yi, cols, rows)
-                tile_rect = self.calc_col_gradient_tile(width, height, rows, cols, xi, yi)
+                tile_rect = self.calc_col_gradient_tile(rows, cols, width, height, xi, yi)
                 if False == job.add(tile_rect, mask_rect):
                     break
                 actual_batch_size += 1
@@ -461,90 +483,14 @@ class USDUSeamsFix():
 
         
     def calc_mask_in_tile(self, xi, yi, cols, rows):
-        start_x = 0
-        end_x = 0
-        if xi == 0:
-            start_x = 0
-            end_x = self.tile_size
-        elif xi == (cols - 1):
-            end_x = self.padding + self.tile_size
-            start_x = self.padding
-        else:
-            start_x = self.padding / 2
-            end_x = start_x + self.tile_size
-        
-        start_y = 0
-        end_y = 0
-        if yi == 0:
-            start_y = 0
-            end_y = self.tile_size
-        elif yi == (rows - 1):
-            start_y = self.padding
-            end_y = self.padding + self.tile_size
-        else:
-            start_y = self.padding // 2
-            end_y = start_y + self.tile_size
-        rect = math.floor(start_x), math.floor(start_y), math.floor(end_x), math.floor(end_y)
-        return rect
+        return RectCalculator.calc_mask_in_tile(self.tile_size, self.padding, xi, yi, cols, rows)
 
-    def calc_row_gradient_tile(self, width, height, rows, cols, xi, yi):
-        start_x = 0
-        end_x = 0
-        if xi == 0:
-            start_x = 0
-            end_x = self.tile_size + self.padding
-        elif xi == (cols - 1):
-            end_x = width
-            start_x = end_x - self.tile_size - self.padding
-        else:
-            start_x = self.tile_size * xi - (self.padding // 2)
-            end_x = start_x + self.padding + self.tile_size
-        
-        start_y = 0
-        end_y = 0
-        if yi == 0:
-            start_y = 0
-            end_y = self.tile_size + self.padding
-        elif yi == (rows - 1):
-            end_y = height
-            start_y = end_y - self.tile_size - self.padding
-        else:
-            start_y = self.tile_size * yi - (self.padding // 2)
-            end_y = start_y + self.padding + self.tile_size
-        start_y += self.tile_size // 2
-        end_y += self.tile_size // 2    
-        rect = math.floor(start_x), math.floor(start_y), math.floor(end_x), math.floor(end_y)
-        return rect
+    def calc_row_gradient_tile(self, rows, cols, width, height, xi, yi):
+        return RectCalculator.calc_row_seam_in_tile(self.tile_size, self.padding, width, height, xi, yi, cols, rows)
 
-    def calc_col_gradient_tile(self, width, height, rows, cols, xi, yi):
-        start_x = 0
-        end_x = 0
-        if xi == 0:
-            start_x = 0
-            end_x = self.tile_size + self.padding
-        elif xi == (cols - 1):
-            end_x = width
-            start_x = end_x - self.tile_size - self.padding
-        else:
-            start_x = self.tile_size * xi - (self.padding // 2)
-            end_x = start_x + self.padding + self.tile_size
-        start_x += self.tile_size // 2
-        end_x += self.tile_size // 2      
-
-        start_y = 0
-        end_y = 0
-        if yi == 0:
-            start_y = 0
-            end_y = self.tile_size + self.padding
-        elif yi == (rows - 1):
-            end_y = height
-            start_y = end_y - self.tile_size - self.padding
-        else:
-            start_y = self.tile_size * yi - (self.padding // 2)
-            end_y = start_y + self.padding + self.tile_size
-        rect = math.floor(start_x), math.floor(start_y), math.floor(end_x), math.floor(end_y)
-        return rect
-
+    def calc_col_gradient_tile(self, rows, cols, width, height, xi, yi):
+        return RectCalculator.calc_col_seam_in_tile(self.tile_size, self.padding, width, height, xi, yi, cols, rows)
+       
     def half_tile_process(self, p, image, rows, cols):
         debug = False
         self.init_draw(p)
@@ -676,7 +622,8 @@ class USDUSeamsFix():
         return fixed_image
 
     def band_pass_process(self, p, image, cols, rows):
-        
+        debug = False
+
         self.init_draw(p)
         processed = None
 
@@ -747,7 +694,6 @@ class Script(scripts.Script):
         return is_img2img
 
     def ui(self, is_img2img):
-        print("def the new stuff")
         target_size_types = [
             "From img2img2 settings",
             "Custom size",
@@ -787,7 +733,7 @@ class Script(scripts.Script):
             seams_fix_type = gr.Dropdown(label="3. Deseam", choices=[k for k in seams_fix_types], type="index", value=seams_fix_types[2])
             seams_fix_denoise = gr.Slider(label='Denoise (%)', minimum=0, maximum=1, step=0.01, value=0.45, visible=True, interactive=True)
             seams_fix_width = gr.Slider(label='Width', minimum=0, maximum=128, step=1, value=64, visible=False, interactive=True)
-            seam_blur = gr.Slider(label='Blur (px)', minimum=0, maximum=64, step=1, value=0, visible=True, interactive=True)
+            seams_blur = gr.Slider(label='Blur (px)', minimum=0, maximum=64, step=1, value=0, visible=True, interactive=True)
             seams_fix_padding = gr.Slider(label='Context Padding (px)', minimum=0, maximum=128, step=1, value=128, visible=True, interactive=True)
         with gr.Row():
             save_upscaled_image = gr.Checkbox(label="Save Redraw", value=True)
@@ -806,7 +752,7 @@ class Script(scripts.Script):
         seams_fix_type.change(
             fn=select_fix_type,
             inputs=seams_fix_type,
-            outputs=[seams_fix_denoise, seams_fix_width, seam_blur, seams_fix_padding]
+            outputs=[seams_fix_denoise, seams_fix_width, seams_blur, seams_fix_padding]
         )
 
         def select_scale_type(scale_index):
@@ -823,13 +769,12 @@ class Script(scripts.Script):
             inputs=target_size_type,
             outputs=[custom_width, custom_height, custom_scale]
         )
-        print("completed rteurning the new stuff")
         return [tile_size, redraw_blur, padding, seams_fix_width, seams_fix_denoise, seams_fix_padding,
-                upscaler_index, save_upscaled_image, redraw_mode, save_seams_fix_image, seam_blur, 
+                upscaler_index, save_upscaled_image, redraw_mode, save_seams_fix_image, seams_blur, 
                 seams_fix_type, target_size_type, custom_width, custom_height, custom_scale]
 
-    def run(self, p, _, tile_size, mask_blur, padding, seams_fix_width, seams_fix_denoise, seams_fix_padding, 
-            upscaler_index, save_upscaled_image, redraw_mode, save_seams_fix_image, seam_bark, 
+    def run(self, p, tile_size, redraw_blur, padding, seams_fix_width, seams_fix_denoise, seams_fix_padding, 
+            upscaler_index, save_upscaled_image, redraw_mode, save_seams_fix_image, seams_blur, 
             seams_fix_type, target_size_type, custom_width, custom_height, custom_scale):
 
         # Init
@@ -857,14 +802,14 @@ class Script(scripts.Script):
         if target_size_type == 2:
             p.width = math.ceil((init_img.width * custom_scale) / 64) * 64
             p.height = math.ceil((init_img.height * custom_scale) / 64) * 64
-
+        print("Target size type ", target_size_type, " thus tile width and height are", p.width, p.height)
         # Upscaling
         upscaler = USDUpscaler(p, init_img, upscaler_index, save_upscaled_image, save_seams_fix_image, tile_size)
         upscaler.upscale()
         
         # Drawing
-        upscaler.setup_redraw(redraw_mode, padding, mask_blur)
-        upscaler.setup_seams_fix(seams_fix_padding, seams_fix_denoise, seam_bark, seams_fix_width, seams_fix_type)
+        upscaler.setup_redraw(redraw_mode, padding, redraw_blur)
+        upscaler.setup_seams_fix(seams_fix_padding, seams_fix_denoise, seams_blur, seams_fix_width, seams_fix_type)
         upscaler.print_info()
         upscaler.add_extra_info()
         upscaler.process()
