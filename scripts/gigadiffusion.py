@@ -13,7 +13,7 @@ class RectCalculator:
     def prefer_double_draw():
         # Set true to inset the last tile in rows/cols such that it sees as much of the original image as possible.
         # This also causes 2x the redraws in certain areas of the image, adjacent to seams, which is distracting. 
-        return False
+        return True
         
     @staticmethod
     def calc_row_seam_in_tile(tile_size, padding, width, height, xi, yi, cols, rows):
@@ -28,15 +28,17 @@ class RectCalculator:
         return (mask[0] + x_shift, mask[1], mask[2] + x_shift, mask[3])
 
     @staticmethod
-    def calc_mask_in_tile(tile_size, padding, xi, yi, cols, rows):
+    def calc_mask_in_tile(tile_size, padding, width, height, xi, yi, cols, rows):
         start_x = 0
         end_x = 0
         if xi == 0:
             start_x = 0
             end_x = tile_size
         elif xi == (cols - 1) and RectCalculator.prefer_double_draw():
-            end_x = padding + tile_size
-            start_x = padding
+            mask_width = (width - (xi * tile_size))
+            tile_mask_width_difference = tile_size - mask_width
+            start_x = padding + tile_mask_width_difference
+            end_x = start_x + mask_width
         else:
             start_x = padding / 2
             end_x = start_x + tile_size
@@ -47,8 +49,10 @@ class RectCalculator:
             start_y = 0
             end_y = tile_size
         elif yi == (rows - 1) and RectCalculator.prefer_double_draw():
-            start_y = padding
-            end_y = padding + tile_size
+            mask_height = (height - (yi * tile_size))
+            tile_mask_height_difference = tile_size - mask_height
+            start_y = padding + tile_mask_height_difference
+            end_y = start_y + mask_height
         else:
             start_y = padding // 2
             end_y = start_y + tile_size
@@ -178,6 +182,7 @@ class USDUpscaler():
         self.image = self.image.resize((self.p.width, self.p.height), resample=Image.LANCZOS)
 
     def setup_redraw(self, redraw_mode, padding, mask_blur):
+        self.redraw.upscaler = self
         self.redraw.mode = USDUMode(redraw_mode)
         self.redraw.enabled = self.redraw.mode != USDUMode.NONE
         self.redraw.padding = padding
@@ -209,10 +214,10 @@ class USDUpscaler():
         print(f"Seams fix mode: {self.seams_fix.mode.name}")
 
     def add_extra_info(self):
-        self.p.extra_generation_params["Ultimate SD upscale upscaler"] = self.upscaler.name
-        self.p.extra_generation_params["Ultimate SD upscale tile_size"] = self.redraw.tile_size
-        self.p.extra_generation_params["Ultimate SD upscale mask_blur"] = self.p.mask_blur
-        self.p.extra_generation_params["Ultimate SD upscale padding"] = self.redraw.padding
+        self.p.extra_generation_params["Gigadiffusion upscaler"] = self.upscaler.name
+        self.p.extra_generation_params["Gigadiffusion redraw tile_size"] = self.redraw.tile_size
+        self.p.extra_generation_params["Gigadiffusion redraw mask_blur"] = self.p.mask_blur
+        self.p.extra_generation_params["Gigadiffusion redraw padding"] = self.redraw.padding
 
     def process(self):
         state.begin()
@@ -224,14 +229,17 @@ class USDUpscaler():
             self.result_images.append(self.image.copy())
             if self.redraw.save:
                 self.save_image()
-
-        if self.seams_fix.enabled:
+        if state.interrupted:
+            if self.seams_fix.enabled:
+                print("interrupted before seams fix, won't save image")
+            state.end()
+        elif self.seams_fix.enabled:
             self.image = self.seams_fix.start(self.p, self.image, self.rows, self.cols)
             self.initial_info = self.seams_fix.initial_info
             self.result_images.append(self.image)
             if self.seams_fix.save:
                 self.save_image()
-        state.end()
+            state.end()
 
 class USDURedraw():
 
@@ -252,7 +260,7 @@ class USDURedraw():
                 tile_rect = self.calc_tile(image.width, image.height, rows, cols, xi, yi)
                 cropped = image.crop(tile_rect)              
                 mask, draw = self.init_draw(p, cropped.width, cropped.height)
-                mask_rect = self.calc_mask_in_tile(xi, yi, cols, rows)
+                mask_rect = self.calc_mask_in_tile(xi, yi, image.width, image.height, cols, rows)
                 draw.rectangle(mask_rect, fill="white")
                 p.init_images = [cropped]
                 p.image_mask = mask
@@ -266,8 +274,8 @@ class USDURedraw():
 
         return image
     
-    def calc_mask_in_tile(self, xi, yi, cols, rows):
-        return RectCalculator.calc_mask_in_tile(self.tile_size, self.padding, xi, yi, cols, rows)
+    def calc_mask_in_tile(self, xi, yi, width, height, cols, rows):
+        return RectCalculator.calc_mask_in_tile(self.tile_size, self.padding,  width, height, xi, yi, cols, rows)
 
     def calc_tile(self, width, height, rows, cols, xi, yi):
         return RectCalculator.calc_tile(self.tile_size, self.padding, width, height, xi, yi, cols, rows)
@@ -312,7 +320,7 @@ class USDURedraw():
                 pair = tiles[pair_index]
                 xi = pair[0]
                 yi = pair[1]
-                mask_rect = self.calc_mask_in_tile(xi, yi, cols, rows)
+                mask_rect = self.calc_mask_in_tile(xi, yi, width, height, cols, rows)
                 tile_rect = self.calc_tile(width, height, rows, cols, xi, yi)
                 if False == job.add(tile_rect, mask_rect):
                     break
@@ -325,6 +333,7 @@ class USDURedraw():
 
     def chess_process(self, p, image):
         debug = False
+        debug_writes_tiles = False
         jobs = self.jobs
         processed_count = 0
         while(len(jobs) > 0):
@@ -335,6 +344,7 @@ class USDURedraw():
             for index in range(len(job.tile_rects)):
                 init_images.append(image.crop(job.tile_rects[index]))
             p.init_images = init_images
+            p.seed = random.randint(0, 1048576)
             p.all_seeds = [random.randint(0, 1048576) for i in range(len(init_images))]; 
             p.all_subseeds = [random.randint(0, 1048576) for i in range(len(init_images))];
             tile_rect = job.tile_rects[0]
@@ -342,24 +352,42 @@ class USDURedraw():
             draw.rectangle(job.mask_rect, fill="white") 
             p.image_mask = mask
             p.batch_size = len(init_images)
+            processed = processing.process_images(p)
+            processed_count += len(processed.images)
             if debug:
-                if image.mode != "RGBA":
-                    image = image.convert("RGBA")
                 for index in range(len(init_images)):
-                    init_image = Image.new("RGBA", init_images[index].size, (255, 0, 0, 255))
-                    d = ImageDraw.Draw(init_image)
-                    d.rectangle(job.mask_rect, fill=(0,255,0,255))
-                    d.text((job.mask_rect[0], job.mask_rect[1]), str(processed_count), fill=(0, 0, 0, 255), stroke_fill=(255, 255, 255, 255), stroke_width=2)
-                    d.text((job.mask_rect[0] + 16, job.mask_rect[1]), str(processed_count), fill=(255, 255, 255, 255), stroke_fill=(0, 0, 0, 255), stroke_width=2)
-                    print("tile #", processed_count, "in rect", job.tile_rects[index], "and mask rect", job.mask_rect)
-                    processed_count += 1
-                    image.paste(init_image, job.tile_rects[index])
-            else:        
-                processed = processing.process_images(p)
-                processed_count += len(processed.images)
+                    if debug_writes_tiles:
+                        self.upscaler.result_images.append(init_images[index])
+                        self.upscaler.result_images.append(processed.images[index])
+                        paste_image = processed.images[index]
+                        tile_rect = job.tile_rects[index]
+                        mask_rect = job.mask_rect
+                        left = tile_rect[0] + mask_rect[0]
+                        top = tile_rect[1] + mask_rect[1]
+                        right = left + (mask_rect[2] - mask_rect[0])
+                        bottom = top + (mask_rect[3] - mask_rect[1])
+                        print('paste image size is', paste_image.width, 'x', paste_image.height, 'tile_rect', tile_rect, "mask_rect", mask_rect, "ltrb", (left, top, right, bottom))
+                        image.paste(paste_image, tile_rect)
+                    else:    
+                        if image.mode != "RGBA":
+                            image = image.convert("RGBA")
+                        init_image = Image.new("RGBA", init_images[index].size, (255, 0, 0, 255))
+                        d = ImageDraw.Draw(init_image)
+                        d.rectangle(job.mask_rect, fill=(0,255,0,255))
+                        d.text((job.mask_rect[0], job.mask_rect[1]), str(processed_count), fill=(0, 0, 0, 255), stroke_fill=(255, 255, 255, 255), stroke_width=2)
+                        d.text((job.mask_rect[0] + 16, job.mask_rect[1]), str(processed_count), fill=(255, 255, 255, 255), stroke_fill=(0, 0, 0, 255), stroke_width=2)
+                        print("tile #", processed_count, "in rect", job.tile_rects[index], "and mask rect", job.mask_rect)
+                        image.paste(init_image, job.tile_rects[index])
+            else:
                 for index in range(len(processed.images)):
                     paste_image = processed.images[index]
-                    image.paste(paste_image, job.tile_rects[index])
+                    tile_rect = job.tile_rects[index]
+                    mask_rect = job.mask_rect
+                    left = tile_rect[0] + mask_rect[0]
+                    top = tile_rect[1] + mask_rect[1]
+                    right = left + (mask_rect[2] - mask_rect[0])
+                    bottom = top + (mask_rect[3] - mask_rect[1])
+                    image.paste(paste_image,  tile_rect)
         p.width = image.width
         p.height = image.height
         if not debug:
@@ -428,7 +456,7 @@ class USDUSeamsFix():
                 pair = row_tiles[pair_index]
                 xi = pair[0]
                 yi = pair[1]
-                mask_rect = self.calc_mask_in_tile(xi, yi, cols, rows)
+                mask_rect = self.calc_mask_in_tile(xi, yi, width, height, cols, rows)
                 tile_rect = self.calc_row_gradient_tile(rows, cols, width, height, xi, yi)
                 if False == job.add(tile_rect, mask_rect):
                     break
@@ -470,7 +498,7 @@ class USDUSeamsFix():
                 pair = col_tiles[pair_index]
                 xi = pair[0]
                 yi = pair[1]
-                mask_rect = self.calc_mask_in_tile(xi, yi, cols, rows)
+                mask_rect = self.calc_mask_in_tile(xi, yi, width, height, cols, rows)
                 tile_rect = self.calc_col_gradient_tile(rows, cols, width, height, xi, yi)
                 if False == job.add(tile_rect, mask_rect):
                     break
@@ -482,8 +510,8 @@ class USDUSeamsFix():
         print(len(self.col_jobs) + len(self.row_jobs), "seams fix jobs with max batch size", requested_batch_size)
 
         
-    def calc_mask_in_tile(self, xi, yi, cols, rows):
-        return RectCalculator.calc_mask_in_tile(self.tile_size, self.padding, xi, yi, cols, rows)
+    def calc_mask_in_tile(self, xi, yi,width, height,  cols, rows):
+        return RectCalculator.calc_mask_in_tile(self.tile_size, self.padding,  width, height, xi,yi, cols, rows)
 
     def calc_row_gradient_tile(self, rows, cols, width, height, xi, yi):
         return RectCalculator.calc_row_seam_in_tile(self.tile_size, self.padding, width, height, xi, yi, cols, rows)
@@ -525,6 +553,7 @@ class USDUSeamsFix():
             p.height = self.tile_size
             p.inpaint_full_res = True
             p.inpaint_full_res_padding = self.padding
+            p.seed = random.randint(0, 1048576)
             p.all_seeds = [random.randint(0, 1048576) for i in range(len(init_images))]; 
             p.all_subseeds = [random.randint(0, 1048576) for i in range(len(init_images))];
             p.init_images = init_images   
@@ -558,6 +587,7 @@ class USDUSeamsFix():
             p.height = self.tile_size
             p.inpaint_full_res = True
             p.inpaint_full_res_padding = self.padding
+            p.seed = random.randint(0, 1048576)
             p.all_seeds = [random.randint(0, 1048576) for i in range(len(init_images))]; 
             p.all_subseeds = [random.randint(0, 1048576) for i in range(len(init_images))];
             p.init_images = init_images   
@@ -783,8 +813,7 @@ class Script(scripts.Script):
 
         p.do_not_save_grid = True
         p.do_not_save_samples = True
-        p.inpaint_full_res = False
-
+        p.inpaint_full_res = True
         p.inpainting_fill = 1
 
         seed = p.seed
