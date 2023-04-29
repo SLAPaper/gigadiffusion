@@ -332,8 +332,6 @@ class USDURedraw():
         print(len(self.jobs), "redraw chess jobs with max batch size", requested_batch_size)
 
     def chess_process(self, p, image):
-        debug = False
-        debug_writes_tiles = False
         jobs = self.jobs
         processed_count = 0
         while(len(jobs) > 0):
@@ -354,46 +352,18 @@ class USDURedraw():
             p.batch_size = len(init_images)
             processed = processing.process_images(p)
             processed_count += len(processed.images)
-            if debug:
-                for index in range(len(init_images)):
-                    if debug_writes_tiles:
-                        self.upscaler.result_images.append(init_images[index])
-                        self.upscaler.result_images.append(processed.images[index])
-                        paste_image = processed.images[index]
-                        tile_rect = job.tile_rects[index]
-                        mask_rect = job.mask_rect
-                        left = tile_rect[0] + mask_rect[0]
-                        top = tile_rect[1] + mask_rect[1]
-                        right = left + (mask_rect[2] - mask_rect[0])
-                        bottom = top + (mask_rect[3] - mask_rect[1])
-                        print('paste image size is', paste_image.width, 'x', paste_image.height, 'tile_rect', tile_rect, "mask_rect", mask_rect, "ltrb", (left, top, right, bottom))
-                        image.paste(paste_image, tile_rect)
-                    else:    
-                        if image.mode != "RGBA":
-                            image = image.convert("RGBA")
-                        init_image = Image.new("RGBA", init_images[index].size, (255, 0, 0, 255))
-                        d = ImageDraw.Draw(init_image)
-                        d.rectangle(job.mask_rect, fill=(0,255,0,255))
-                        d.text((job.mask_rect[0], job.mask_rect[1]), str(processed_count), fill=(0, 0, 0, 255), stroke_fill=(255, 255, 255, 255), stroke_width=2)
-                        d.text((job.mask_rect[0] + 16, job.mask_rect[1]), str(processed_count), fill=(255, 255, 255, 255), stroke_fill=(0, 0, 0, 255), stroke_width=2)
-                        print("tile #", processed_count, "in rect", job.tile_rects[index], "and mask rect", job.mask_rect)
-                        image.paste(init_image, job.tile_rects[index])
-            else:
-                for index in range(len(processed.images)):
-                    paste_image = processed.images[index]
-                    tile_rect = job.tile_rects[index]
-                    mask_rect = job.mask_rect
-                    left = tile_rect[0] + mask_rect[0]
-                    top = tile_rect[1] + mask_rect[1]
-                    right = left + (mask_rect[2] - mask_rect[0])
-                    bottom = top + (mask_rect[3] - mask_rect[1])
-                    image.paste(paste_image,  tile_rect)
+            for index in range(len(job.tile_rects)):
+                paste_image = processed.images[index]
+                tile_rect = job.tile_rects[index]
+                mask_rect = job.mask_rect
+                left = tile_rect[0] + mask_rect[0]
+                top = tile_rect[1] + mask_rect[1]
+                right = left + (mask_rect[2] - mask_rect[0])
+                bottom = top + (mask_rect[3] - mask_rect[1])
+                image.paste(paste_image,  tile_rect)
         p.width = image.width
         p.height = image.height
-        if not debug:
-            self.initial_info = processed.infotext(p, 0)
-        else:
-            self.initial_info = "no info, redraw in debug mode"    
+        self.initial_info = processed.infotext(p, 0)
 
         return image
     
@@ -520,7 +490,6 @@ class USDUSeamsFix():
         return RectCalculator.calc_col_seam_in_tile(self.tile_size, self.padding, width, height, xi, yi, cols, rows)
        
     def half_tile_process(self, p, image, rows, cols):
-        debug = False
         self.init_draw(p)
         processed = None
 
@@ -563,18 +532,11 @@ class USDUSeamsFix():
             tile_height = job.tile_rects[0][3] - job.tile_rects[0][1]
             mask = Image.new("RGB", (tile_width, tile_height), "black")
             mask.paste(row_gradient, (job.mask_rect[0],job.mask_rect[1]))
-            if debug:
-                for index in range(len(init_images)):
-                    init_image = init_images[index]
-                    init_image.paste(mask, (0, 0))
-                    image.paste(init_image, job.tile_rects[index])
-                    processed_count += 1
-            else:    
-                p.image_mask = mask
-                processed = processing.process_images(p)
-                processed_count += len(processed.images)
-                for index in range(len(processed.images)):
-                    image.paste(processed.images[index], job.tile_rects[index])    
+            p.image_mask = mask
+            processed = processing.process_images(p)
+            processed_count += len(processed.images)
+            for index in range(len(job.tile_rects)):
+                image.paste(processed.images[index], job.tile_rects[index])    
         jobs = self.col_jobs
         while(len(jobs) > 0):
             if state.interrupted:
@@ -596,25 +558,15 @@ class USDUSeamsFix():
             tile_height = job.tile_rects[0][3] - job.tile_rects[0][1]
             mask = Image.new("RGB", (tile_width, tile_height), "black")
             mask.paste(col_gradient, (job.mask_rect[0],job.mask_rect[1]))
-            if debug:
-                for index in range(len(init_images)):
-                    init_image = init_images[index]
-                    init_image.paste(mask, (0, 0))
-                    image.paste(init_image, job.tile_rects[index])
-                    processed_count += 1
-            else:    
-                p.image_mask = mask
-                processed = processing.process_images(p)
-                processed_count += len(processed.images)
-                for index in range(len(processed.images)):
-                    image.paste(processed.images[index], job.tile_rects[index])    
+            p.image_mask = mask
+            processed = processing.process_images(p)
+            processed_count += len(processed.images)
+            for index in range(len(job.tile_rects)):
+                image.paste(processed.images[index], job.tile_rects[index])    
     
         p.width = image.width
         p.height = image.height
-        if debug:
-            self.initial_info = "debugging run"
-        else:    
-            self.initial_info = processed.infotext(p, 0)
+        self.initial_info = processed.infotext(p, 0)
         return image
 
     def half_tile_process_corners(self, p, image, rows, cols):
@@ -652,8 +604,6 @@ class USDUSeamsFix():
         return fixed_image
 
     def band_pass_process(self, p, image, cols, rows):
-        debug = False
-
         self.init_draw(p)
         processed = None
 
